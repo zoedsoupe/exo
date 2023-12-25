@@ -55,9 +55,9 @@ func validatePassword(field string, curr interface{}) (bool, error) {
         }
 
         return true, nil
-        
-  		default:
-  			return false, errors.New("Field isn't a string")
+
+      default:
+        return false, errors.New("Field isn't a string")
      }
 }
 ```
