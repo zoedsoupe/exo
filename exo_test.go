@@ -2,6 +2,7 @@ package exo
 
 import (
 	"reflect"
+	"regexp"
 	"testing"
 )
 
@@ -13,6 +14,107 @@ func inMap(a map[string]interface{}, val interface{}) bool {
 	}
 
 	return false
+}
+
+func TestPutChange(t *testing.T) {
+	var T = struct{ A string }{A: ""}
+	attrs := map[string]interface{}{"A": "hello"}
+	c := New(T, attrs).Cast([]string{"A"})
+
+	c = c.PutChange("A", "oi")
+
+	if a, ok := c.GetChange("A"); ok && a != "oi" {
+		t.Errorf("PutChange should overwrite the current value")
+	}
+
+	c = c.PutChange("B", "ixe")
+}
+
+func TestAddError(t *testing.T) {
+	var T = struct{ A string }{A: ""}
+	attrs := map[string]interface{}{"A": "hello"}
+	c := New(T, attrs).Cast([]string{"A"})
+
+	c = c.AddError("A", "WE HAVE AN ERROR")
+
+	err := c.GetError("A")
+
+	if !(err != nil) {
+		t.Errorf("AddError should return an error on a existing key")
+	}
+}
+
+func TestValidateRequired(t *testing.T) {
+	var T = struct {
+		A string
+		B int
+	}{A: ""}
+	attrs := map[string]interface{}{"A": "hello"}
+	c := New(T, attrs).Cast([]string{"A", "B"})
+
+	c = c.ValidateRequired([]string{"A", "B"})
+
+	if c.isValid {
+		t.Errorf("ValidateRequired should add error on non existing keys")
+	}
+
+	err := c.GetError("B")
+
+	if !(err != nil) {
+		t.Errorf("ValidateRequired should return an error on a existing key")
+	}
+}
+
+func TestUpdateChange(t *testing.T) {
+	var T = struct{ A string }{A: ""}
+	attrs := map[string]interface{}{"A": "hello"}
+	c := New(T, attrs).Cast([]string{"A"})
+
+	c = c.UpdateChange("A", func(a interface{}) interface{} {
+		return "foo"
+	})
+
+	if a, ok := c.GetChange("A"); ok && a == "hello" {
+		t.Errorf("UpdateChange should modify the current change value on specified key")
+	}
+
+}
+
+func TestValidateAcceptance(t *testing.T) {
+	var T = struct{ A bool }{A: false}
+	attrs := map[string]interface{}{"A": false}
+	c := New(T, attrs).Cast([]string{"A"})
+
+	c = c.ValidateAcceptance("A")
+
+	if c.isValid {
+		t.Errorf("ValidateAcceptance should add error on non tru keys")
+	}
+
+	err := c.GetError("A")
+
+	if !(err != nil) {
+		t.Errorf("ValidateAcceptance should return an error on a non true key")
+	}
+}
+
+func TestValidateFormat(t *testing.T) {
+	var T = struct{ A string }{A: "hello"}
+	attrs := map[string]interface{}{"A": "hello"}
+	c := New(T, attrs).Cast([]string{"A"})
+
+	re := regexp.MustCompile("hello")
+	c = c.ValidateFormat("A", re)
+
+	if !c.isValid {
+		t.Errorf("ValidateFormat shouldn't add error on a valid format keys")
+	}
+
+	err := c.GetError("A")
+
+	if err != nil {
+		t.Errorf("ValidateFormat shouldn't return an error on a valid format key")
+	}
 }
 
 type T struct {

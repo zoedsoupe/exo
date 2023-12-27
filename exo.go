@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -77,6 +78,91 @@ func Apply[T any](c changeset) (T, error) {
 	}
 
 	return s, nil
+}
+
+func (c changeset) AddError(field string, err string) changeset {
+	c.errors[field] = errors.New(err)
+	return c
+}
+
+func (c changeset) PutChange(field string, change interface{}) changeset {
+	c.changes[field] = change
+	return c
+}
+
+func (c changeset) UpdateChange(field string, cb func(interface{}) interface{}) changeset {
+	v := cb(c.changes[field])
+	return c.PutChange(field, v)
+}
+
+func (c changeset) ValidateRequired(need []string) changeset {
+	keys := make([]string, len(c.changes))
+
+	for k := range c.changes {
+		keys = append(keys, k)
+	}
+
+	slices.Sort[[]string](keys)
+	slices.Sort[[]string](need)
+
+	diff := difference(need, keys)
+
+	if len(diff) > 0 {
+		c.isValid = false
+
+		for _, key := range diff {
+			msg := fmt.Sprintf("%s is required", key)
+			c = c.AddError(key, msg)
+		}
+		return c
+	}
+
+	return c
+}
+
+func difference(a, b []string) []string {
+	mb := make(map[string]struct{}, len(b))
+	for _, x := range b {
+		mb[x] = struct{}{}
+	}
+	var diff []string
+	for _, x := range a {
+		if _, found := mb[x]; !found {
+			diff = append(diff, x)
+		}
+	}
+	return diff
+}
+
+func (c changeset) ValidateAcceptance(field string) changeset {
+	isTrue := func(field string, v interface{}) (bool, error) {
+		if v == false {
+			msg := fmt.Sprintf("%s is not true", field)
+			return false, errors.New(msg)
+		}
+
+		return true, nil
+	}
+
+	return c.ValidateChange(field, isTrue)
+}
+
+func (c changeset) ValidateFormat(field string, re *regexp.Regexp) changeset {
+	hasFormat := func(field string, curr interface{}) (bool, error) {
+		switch curr.(type) {
+		case string:
+			if re.FindString(curr.(string)) == "" {
+				return false, errors.New("password must match alphabetic chars")
+			}
+
+			return true, nil
+
+		default:
+			return false, errors.New("Field isn't a string")
+		}
+	}
+
+	return c.ValidateChange(field, hasFormat)
 }
 
 func (c changeset) ValidateLength(field string, length int) changeset {
