@@ -5,50 +5,41 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
-	"slices"
 	"strings"
 )
 
-type changeset struct {
+type changeset[T struct{}] struct {
 	changes map[string]interface{}
 	params  map[string]interface{}
 	errors  map[string]error
-	data    interface{}
+	data    T
 	isValid bool
 }
 
-func New(data interface{}, params map[string]interface{}) changeset {
-	var c changeset
+func Cast[T struct{}](params map[string]interface{}) changeset[T] {
+	var s T
+	var c changeset[T]
 	c.params = params
-	c.data = data
+	c.data = s
 	c.isValid = true
 	c.errors = make(map[string]error)
-	return c
-}
 
-func (c changeset) Cast(fields []string) changeset {
-	if len(c.params) < 1 {
-		return c
-	}
+	for _, f := range StructFields(s) {
+		field := f.Name
 
-	c.changes = c.filterFields(fields)
-	return c
-}
+		change, ok := params[field]
 
-func (c changeset) filterFields(fields []string) map[string]interface{} {
-	out := make(map[string]interface{})
-
-	for k, v := range c.params {
-		if !slices.Contains(fields, k) {
+		if !ok {
 			continue
 		}
-		out[k] = v
+
+		c.changes[field] = change
 	}
 
-	return out
+	return c
 }
 
-func Apply[T any](c changeset) (T, error) {
+func Apply[T struct{}](c changeset[T]) (T, error) {
 	var s T
 
 	t := reflect.TypeOf(s)
@@ -87,7 +78,7 @@ func Apply[T any](c changeset) (T, error) {
 	return s, nil
 }
 
-func (c changeset) AddError(field string, err string) changeset {
+func (c changeset[T]) AddError(field string, err string) changeset[T] {
 	c.errors[field] = errors.New(err)
 	return c
 }
@@ -97,7 +88,7 @@ func (c changeset) PutChange(field string, change interface{}) changeset {
 	return c
 }
 
-func (c changeset) UpdateChange(field string, cb func(interface{}) interface{}) changeset {
+func (c changeset[T]) UpdateChange(field string, cb func(interface{}) interface{}) changeset[T] {
 	v := cb(c.changes[field])
 	return c.PutChange(field, v)
 }
@@ -219,25 +210,25 @@ func (c changeset) ValidateChange(field string, validator func(string, interface
 	return c
 }
 
-func (c changeset) GetChange(field string) (interface{}, bool) {
+func (c changeset[T]) GetChange(field string) (interface{}, bool) {
 	v, ok := c.changes[field]
 
 	return v, ok
 }
 
-func (c changeset) GetChanges() map[string]interface{} {
+func (c changeset[T]) GetChanges() map[string]interface{} {
 	return c.changes
 }
 
-func (c changeset) GetParams() map[string]interface{} {
+func (c changeset[T]) GetParams() map[string]interface{} {
 	return c.params
 }
 
-func (c changeset) GetErrors() map[string]error {
+func (c changeset[T]) GetErrors() map[string]error {
 	return c.errors
 }
 
-func (c changeset) GetError(field string) error {
+func (c changeset[T]) GetError(field string) error {
 	return c.errors[field]
 }
 
