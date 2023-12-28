@@ -1,7 +1,6 @@
 package exo
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -52,8 +51,8 @@ func (c changeset) filterFields(fields []string) map[string]interface{} {
 func Apply[T any](c changeset) (T, error) {
 	var s T
 
-	v := reflect.TypeOf(s)
-	if v.Kind() != reflect.Struct {
+	t := reflect.TypeOf(s)
+	if t.Kind() != reflect.Struct {
 		return s, fmt.Errorf("argument is not a struct")
 	}
 
@@ -67,14 +66,22 @@ func Apply[T any](c changeset) (T, error) {
 		return s, errors.New(msg.String())
 	}
 
-	dict, err := json.Marshal(c.changes)
-	if err != nil {
-		return s, err
-	}
+	r := reflect.ValueOf(&s).Elem()
+	for key, value := range c.changes {
+		f := r.FieldByName(key)
 
-	err = json.Unmarshal(dict, &s)
-	if err != nil {
-		return s, err
+		if !(f.IsValid() && f.CanSet()) {
+			continue
+		}
+
+		val := reflect.ValueOf(value)
+
+		if !val.Type().AssignableTo(f.Type()) {
+			msg := fmt.Sprintf("type mismatch for field %s, expected %s found %s", key, f.Type().String(), val.Type().String())
+			return s, errors.New(msg)
+		}
+
+		f.Set(val)
 	}
 
 	return s, nil
