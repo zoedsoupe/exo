@@ -117,105 +117,214 @@ func (c changeset[T]) UpdateChange(field string, cb func(interface{}) interface{
 	return c.PutChange(field, v)
 }
 
-func (c changeset) ValidateRequired(need []string) changeset {
-	keys := make([]string, len(c.changes))
+type Validator interface {
+	Validate(field string, value interface{}) (bool, error)
+}
 
-	for k := range c.changes {
-		keys = append(keys, k)
+type LengthValidator struct {
+	Min int
+	Max int
+}
+
+func (lv LengthValidator) Validate(field string, v interface{}) (bool, error) {
+	var l int
+	t := reflect.TypeOf(v).String()
+	var msg string
+
+	switch t {
+	case "string":
+		l = len(v.(string))
+		msg = "%s should be %s %d characters"
+	case "slice":
+		l = len(v.([]interface{}))
+		msg = "%s should have %s %d items"
+	case "map":
+		l = len(v.(map[interface{}]interface{}))
+		msg = "%s should have %s %d elements"
+	default:
+		l = -1
 	}
 
-	slices.Sort[[]string](keys)
-	slices.Sort[[]string](need)
+	if lv.Min == lv.Max && l != lv.Min {
+		return false, fmt.Errorf(msg, field, "", lv.Min)
+	}
 
-	diff := difference(need, keys)
+	if l < lv.Min {
+		return false, fmt.Errorf(msg, field, "at least", lv.Min)
+	}
 
-	if len(diff) > 0 {
-		c.isValid = false
+	if l > lv.Max {
+		return false, fmt.Errorf(msg, field, "at most", lv.Max)
+	}
 
-		for _, key := range diff {
-			msg := fmt.Sprintf("%s is required", key)
-			c = c.AddError(key, msg)
+	return true, nil
+}
+
+type FormatValidator struct {
+	Pattern *regexp.Regexp
+}
+
+func (fv FormatValidator) Validate(field string, val interface{}) (bool, error) {
+	v, ok := val.(string)
+
+	if !ok {
+		return false, fmt.Errorf("%s is not a string", field)
+	}
+
+	if fv.Pattern.FindString(v) == "" {
+		return false, fmt.Errorf("%s has invalid format", field)
+	}
+
+	return true, nil
+}
+
+type AcceptanceValidator struct{}
+
+func (av AcceptanceValidator) Validate(field string, val interface{}) (bool, error) {
+	accepted, ok := val.(bool)
+
+	if !ok {
+		return false, fmt.Errorf("%s isn't a boolean", field)
+	}
+
+	if !accepted {
+		return false, fmt.Errorf("%s must be accepted", field)
+	}
+
+	return true, nil
+}
+
+type ExclusionValidator struct {
+	Disallowed []interface{}
+}
+
+func (ev ExclusionValidator) Validate(field string, value interface{}) (bool, error) {
+	for _, disallowed := range ev.Disallowed {
+		if !reflect.DeepEqual(value, disallowed) {
+			return true, nil
 		}
-		return c
+	}
+
+	return false, fmt.Errorf("%s is reserved", field)
+}
+
+type InclusionValidator struct {
+	Allowed []interface{}
+}
+
+func (iv InclusionValidator) Validate(field string, value interface{}) (bool, error) {
+	for _, allowed := range iv.Allowed {
+		if reflect.DeepEqual(value, allowed) {
+			return true, nil
+		}
+	}
+
+	return false, fmt.Errorf("%s is invalid", field)
+}
+
+type Number interface {
+	int | uint | int8 | uint8 | int16 | uint16 | int32 | uint32 | int64 | uint64 | float32 | float64
+}
+
+type LessThanValidator[T Number] struct {
+	MaxValue T
+}
+
+func (ltv LessThanValidator[T]) Validate(field string, val interface{}) (bool, error) {
+	v := val.(T)
+
+	if v > ltv.MaxValue {
+		return false, fmt.Errorf("%s must be less than %v", field, v)
+	}
+
+	return true, nil
+}
+
+type LessThanOrEqualValidator[T Number] struct {
+	MaxValue T
+}
+
+func (ltv LessThanOrEqualValidator[T]) Validate(field string, val interface{}) (bool, error) {
+	v := val.(T)
+
+	if v >= ltv.MaxValue {
+		return false, fmt.Errorf("%s must be less than or equal to %v", field, v)
+	}
+
+	return true, nil
+}
+
+type GreaterThanValidator[T Number] struct {
+	MinValue T
+}
+
+func (gtv GreaterThanValidator[T]) Validate(field string, val interface{}) (bool, error) {
+	v := val.(T)
+
+	if v < gtv.MinValue {
+		return false, fmt.Errorf("%s must be greater than %v", field, v)
+	}
+
+	return true, nil
+}
+
+type GreaterThanOrEqualValidator[T Number] struct {
+	MinValue T
+}
+
+func (gtv GreaterThanOrEqualValidator[T]) Validate(field string, val interface{}) (bool, error) {
+	v := val.(T)
+
+	if v <= gtv.MinValue {
+		return false, fmt.Errorf("%s must be greater than or equal to %v", field, v)
+	}
+
+	return true, nil
+}
+
+type EqualToValidator[T Number] struct {
+	Value T
+}
+
+func (ev EqualToValidator[T]) Validate(field string, val interface{}) (bool, error) {
+	v := val.(T)
+
+	if v == ev.Value {
+		return true, nil
+	}
+
+	return false, fmt.Errorf("%s must be equal to %v", field, v)
+}
+
+type NotEqualToValidator[T Number] struct {
+	Value T
+}
+
+func (nev NotEqualToValidator[T]) Validate(field string, val interface{}) (bool, error) {
+	v := val.(T)
+
+	if v != nev.Value {
+		return true, nil
+	}
+
+	return false, fmt.Errorf("%s must be not equal to %v", field, v)
+}
+
+func (c changeset[T]) ValidateRequired(need []string) changeset[T] {
+	for _, field := range need {
+		fieldValue, exists := c.changes[field]
+
+		if !exists || !reflect.ValueOf(fieldValue).IsValid() {
+			c.isValid = false
+			c.errors[field] = fmt.Errorf("%s is required", field)
+			return c
+		}
 	}
 
 	return c
 }
 
-func difference(a, b []string) []string {
-	mb := make(map[string]struct{}, len(b))
-	for _, x := range b {
-		mb[x] = struct{}{}
-	}
-	var diff []string
-	for _, x := range a {
-		if _, found := mb[x]; !found {
-			diff = append(diff, x)
-		}
-	}
-	return diff
-}
-
-func (c changeset) ValidateAcceptance(field string) changeset {
-	isTrue := func(field string, v interface{}) (bool, error) {
-		if v == false {
-			msg := fmt.Sprintf("%s is not true", field)
-			return false, errors.New(msg)
-		}
-
-		return true, nil
-	}
-
-	return c.ValidateChange(field, isTrue)
-}
-
-func (c changeset) ValidateFormat(field string, re *regexp.Regexp) changeset {
-	hasFormat := func(field string, curr interface{}) (bool, error) {
-		switch curr.(type) {
-		case string:
-			if re.FindString(curr.(string)) == "" {
-				return false, errors.New("password must match alphabetic chars")
-			}
-
-			return true, nil
-
-		default:
-			return false, errors.New("Field isn't a string")
-		}
-	}
-
-	return c.ValidateChange(field, hasFormat)
-}
-
-func (c changeset) ValidateLength(field string, length int) changeset {
-	sameLength := func(field string, curr interface{}) (bool, error) {
-		switch c := curr.(type) {
-		case string:
-			c = curr.(string)
-			if l := len(c); !(l == length) {
-				msg := fmt.Sprintf("current length is %d, expected %d", l, length)
-				return false, errors.New(msg)
-			}
-
-			return true, nil
-
-		case []interface{}:
-			c = curr.([]interface{})
-			if l := len(c); !(l == length) {
-				msg := fmt.Sprintf("current length is %d, expected %d", l, length)
-				return false, errors.New(msg)
-			}
-
-			return true, nil
-		default:
-			return false, errors.New("Field isn't a string or slice")
-		}
-	}
-
-	return c.ValidateChange(field, sameLength)
-}
-
-func (c changeset) ValidateChange(field string, validator func(string, interface{}) (bool, error)) changeset {
+func (c changeset[T]) ValidateChange(field string, v Validator) changeset[T] {
 	val, ok := c.GetChange(field)
 
 	if !ok {
@@ -225,7 +334,7 @@ func (c changeset) ValidateChange(field string, validator func(string, interface
 		return c
 	}
 
-	if ok, error := validator(field, val); !ok {
+	if ok, error := v.Validate(field, val); !ok {
 		c.errors[field] = error
 		c.isValid = false
 		return c

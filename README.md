@@ -35,12 +35,11 @@ func main() {
 	fields := []string{"Username", "Password"}
 	re := regexp.MustCompile("[0-9]")
 
-	changeset := exo.New(user, attrs) // creates new changeset
-	    .Cast(fields) // parse attrs fields based on type
-	    .ValidateLength("Username", 3) // validate the exact string length
-	    .ValidateChange("Username", blockDeniedUsername) // validate custom changes
-	    .ValidateLength("Password", 10)
-	    .ValidateFormat("Password", re) // validate using regex
+	changeset := exo.Cast[User](attrs) // creates new changeset
+	    .ValidateChange("Username", LengthValidator{Min: 3, Max: 3}) // validate the exact string length
+	    .ValidateChange("Username", DeniedValidator{Username: "denied"}) // validate custom changes
+	    .ValidateChange("Password", LengthValidator{Min: 10})
+	    .ValidateChange("Password", FormatValidator{Pattern: re}) // validate using regex
 	    .UpdateChange("Password", hashPassword) // transform changes into the changeset
 
 	user, err := exo.Apply[User](changeset)
@@ -63,9 +62,13 @@ func hashPassword(pass interface{}) interface{} {
 	return string(hash)
 }
 
-func blockDeniedUsername(_ string, username interface{}) (bool, error) {
-	if username == "denied" {
-		return false, errors.New("the 'denied' username is, well, DENIED")
+type DeniedValidator struct {
+	Username string
+}
+
+func (dv DeniedValidator) Validate(_ string, username interface{}) (bool, error) {
+	if username == dv.Username {
+		return false, fmt.Errorf("the username %s is denied", dv.Username)
 	}
 
 	return true, nil
