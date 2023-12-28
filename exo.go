@@ -83,8 +83,32 @@ func (c changeset[T]) AddError(field string, err string) changeset[T] {
 	return c
 }
 
-func (c changeset) PutChange(field string, change interface{}) changeset {
-	c.changes[field] = change
+func (c changeset[T]) PutChange(field string, change interface{}) changeset[T] {
+	sfs := StructFields(c.data)
+	var fields = make([]string, len(sfs))
+
+	for i, f := range sfs {
+		fields[i] = f.Name
+	}
+
+	for i, f := range fields {
+		if field == f {
+			val := reflect.ValueOf(change)
+			sf := sfs[i]
+
+			if !val.Type().AssignableTo(sf.Type) {
+				c.isValid = false
+				c.errors[field] = fmt.Errorf("type mismatch for field %s, expected %s found %s", field, sf.Type.String(), val.Type().String())
+				return c
+			}
+
+			c.changes[field] = change
+			return c
+		}
+	}
+
+	c.isValid = false
+	c.errors[field] = fmt.Errorf("%s is invalid", field)
 	return c
 }
 
