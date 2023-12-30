@@ -1,4 +1,4 @@
-package exo
+package changeset
 
 import (
 	"errors"
@@ -13,7 +13,7 @@ type changeset[T struct{}] struct {
 	params  map[string]interface{}
 	errors  map[string]error
 	data    T
-	isValid bool
+	IsValid bool
 }
 
 func Cast[T struct{}](params map[string]interface{}) changeset[T] {
@@ -21,7 +21,7 @@ func Cast[T struct{}](params map[string]interface{}) changeset[T] {
 	var c changeset[T]
 	c.params = params
 	c.data = s
-	c.isValid = true
+	c.IsValid = true
 	c.errors = make(map[string]error)
 
 	for _, f := range StructFields(s) {
@@ -47,7 +47,7 @@ func Apply[T struct{}](c changeset[T]) (T, error) {
 		return s, fmt.Errorf("argument is not a struct")
 	}
 
-	if !c.isValid {
+	if !c.IsValid {
 		var msg strings.Builder
 		msg.WriteString("changeset has errors:\n\t")
 		for k, v := range c.errors {
@@ -97,7 +97,7 @@ func (c changeset[T]) PutChange(field string, change interface{}) changeset[T] {
 			sf := sfs[i]
 
 			if !val.Type().AssignableTo(sf.Type) {
-				c.isValid = false
+				c.IsValid = false
 				c.errors[field] = fmt.Errorf("type mismatch for field %s, expected %s found %s", field, sf.Type.String(), val.Type().String())
 				return c
 			}
@@ -107,7 +107,7 @@ func (c changeset[T]) PutChange(field string, change interface{}) changeset[T] {
 		}
 	}
 
-	c.isValid = false
+	c.IsValid = false
 	c.errors[field] = fmt.Errorf("%s is invalid", field)
 	return c
 }
@@ -315,7 +315,7 @@ func (c changeset[T]) ValidateRequired(need []string) changeset[T] {
 		fieldValue, exists := c.changes[field]
 
 		if !exists || !reflect.ValueOf(fieldValue).IsValid() {
-			c.isValid = false
+			c.IsValid = false
 			c.errors[field] = fmt.Errorf("%s is required", field)
 			return c
 		}
@@ -330,13 +330,13 @@ func (c changeset[T]) ValidateChange(field string, v Validator) changeset[T] {
 	if !ok {
 		msg := fmt.Sprintf("%s doesn't exist", field)
 		c.errors[field] = errors.New(msg)
-		c.isValid = false
+		c.IsValid = false
 		return c
 	}
 
 	if ok, error := v.Validate(field, val); !ok {
 		c.errors[field] = error
-		c.isValid = false
+		c.IsValid = false
 		return c
 	}
 

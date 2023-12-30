@@ -1,4 +1,4 @@
-package exo
+package changeset_test
 
 import (
 	"reflect"
