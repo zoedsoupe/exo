@@ -1,5 +1,7 @@
 # Exo
 
+[![CI](https://github.com/zoedsoupe/exo/actions/workflows/ci.yml/badge.svg)](https://github.com/zoedsoupe/exo/actions/workflows/ci.yml)
+
 Attempt to port [ecto](https://hexdocs.pm/ecto) Elixir's library to the Go ecosystem!
 
 ## Example
