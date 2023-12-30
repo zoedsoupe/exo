@@ -11,7 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"zoedsoupe/exo"
+	"github.com/zoedsoupe/exo/changeset"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,14 +35,14 @@ func main() {
 	fields := []string{"Username", "Password"}
 	re := regexp.MustCompile("[0-9]")
 
-	changeset := exo.Cast[User](attrs) // creates new changeset
+	changeset := changeset.Cast[User](attrs) // creates new changeset
 	    .ValidateChange("Username", LengthValidator{Min: 3, Max: 3}) // validate the exact string length
 	    .ValidateChange("Username", DeniedValidator{Username: "denied"}) // validate custom changes
 	    .ValidateChange("Password", LengthValidator{Min: 10})
 	    .ValidateChange("Password", FormatValidator{Pattern: re}) // validate using regex
 	    .UpdateChange("Password", hashPassword) // transform changes into the changeset
 
-	user, err := exo.Apply[User](changeset)
+	user, err := changeset.Apply[User](changeset)
 	if err != nil {
 		// here will be a list of changeset errors OR
 		// an error on the struct building step
