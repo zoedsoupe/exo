@@ -6,9 +6,11 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/zoedsoupe/exo"
 )
 
-type changeset[T struct{}] struct {
+type changeset[T interface{}] struct {
 	changes map[string]interface{}
 	params  map[string]interface{}
 	errors  map[string]error
@@ -16,15 +18,22 @@ type changeset[T struct{}] struct {
 	IsValid bool
 }
 
-func Cast[T struct{}](params map[string]interface{}) changeset[T] {
+func Cast[T interface{}](params map[string]interface{}) changeset[T] {
 	var s T
+
+	t := reflect.TypeOf(s)
+	if t.Kind() != reflect.Struct {
+		panic(fmt.Errorf("argument is not a struct"))
+	}
+
 	var c changeset[T]
 	c.params = params
 	c.data = s
 	c.IsValid = true
 	c.errors = make(map[string]error)
+	c.changes = make(map[string]interface{})
 
-	for _, f := range StructFields(s) {
+	for _, f := range exo.StructFields(s) {
 		field := f.Name
 
 		change, ok := params[field]
@@ -39,8 +48,8 @@ func Cast[T struct{}](params map[string]interface{}) changeset[T] {
 	return c
 }
 
-func Apply[T struct{}](c changeset[T]) (T, error) {
-	var s T
+func Apply[T interface{}](c changeset[T]) (T, error) {
+	var s = c.data
 
 	t := reflect.TypeOf(s)
 	if t.Kind() != reflect.Struct {
@@ -84,7 +93,7 @@ func (c changeset[T]) AddError(field string, err string) changeset[T] {
 }
 
 func (c changeset[T]) PutChange(field string, change interface{}) changeset[T] {
-	sfs := StructFields(c.data)
+	sfs := exo.StructFields(c.data)
 	var fields = make([]string, len(sfs))
 
 	for i, f := range sfs {
@@ -363,36 +372,4 @@ func (c changeset[T]) GetErrors() map[string]error {
 
 func (c changeset[T]) GetError(field string) error {
 	return c.errors[field]
-}
-
-func ToMap(s interface{}) map[string]interface{} {
-	out := make(map[string]interface{})
-	fields := StructFields(s)
-
-	for _, field := range fields {
-		name := field.Name
-		val := toValue(s).FieldByName(name)
-		out[name] = val.Interface()
-	}
-
-	return out
-}
-
-func StructFields(s interface{}) []reflect.StructField {
-	t := toValue(s).Type()
-	f := make([]reflect.StructField, t.NumField())
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if field.PkgPath != "" {
-			continue
-		}
-		f[i] = field
-	}
-
-	return f
-}
-
-func toValue(s interface{}) reflect.Value {
-	return reflect.ValueOf(s)
 }

@@ -4,22 +4,18 @@ import (
 	"reflect"
 	"regexp"
 	"testing"
+
+	"github.com/zoedsoupe/exo/changeset"
 )
 
-func inMap(a map[string]interface{}, val interface{}) bool {
-	for _, v := range a {
-		if reflect.DeepEqual(v, val) {
-			return true
-		}
-	}
-
-	return false
+type T struct {
+	A string
+	B int
 }
 
 func TestPutChange(t *testing.T) {
-	var T = struct{ A string }{A: ""}
 	attrs := map[string]interface{}{"A": "hello"}
-	c := New(T, attrs).Cast([]string{"A"})
+	c := changeset.Cast[T](attrs)
 
 	c = c.PutChange("A", "oi")
 
@@ -31,9 +27,8 @@ func TestPutChange(t *testing.T) {
 }
 
 func TestAddError(t *testing.T) {
-	var T = struct{ A string }{A: ""}
 	attrs := map[string]interface{}{"A": "hello"}
-	c := New(T, attrs).Cast([]string{"A"})
+	c := changeset.Cast[T](attrs)
 
 	c = c.AddError("A", "WE HAVE AN ERROR")
 
@@ -45,16 +40,12 @@ func TestAddError(t *testing.T) {
 }
 
 func TestValidateRequired(t *testing.T) {
-	var T = struct {
-		A string
-		B int
-	}{A: ""}
 	attrs := map[string]interface{}{"A": "hello"}
-	c := New(T, attrs).Cast([]string{"A", "B"})
+	c := changeset.Cast[T](attrs)
 
 	c = c.ValidateRequired([]string{"A", "B"})
 
-	if c.isValid {
+	if c.IsValid {
 		t.Errorf("ValidateRequired should add error on non existing keys")
 	}
 
@@ -66,9 +57,8 @@ func TestValidateRequired(t *testing.T) {
 }
 
 func TestUpdateChange(t *testing.T) {
-	var T = struct{ A string }{A: ""}
 	attrs := map[string]interface{}{"A": "hello"}
-	c := New(T, attrs).Cast([]string{"A"})
+	c := changeset.Cast[T](attrs)
 
 	c = c.UpdateChange("A", func(a interface{}) interface{} {
 		return "foo"
@@ -81,13 +71,12 @@ func TestUpdateChange(t *testing.T) {
 }
 
 func TestValidateAcceptance(t *testing.T) {
-	var T = struct{ A bool }{A: false}
 	attrs := map[string]interface{}{"A": false}
-	c := New(T, attrs).Cast([]string{"A"})
+	c := changeset.Cast[T](attrs)
 
-	c = c.ValidateAcceptance("A")
+	c = c.ValidateChange("A", changeset.AcceptanceValidator{})
 
-	if c.isValid {
+	if c.IsValid {
 		t.Errorf("ValidateAcceptance should add error on non tru keys")
 	}
 
@@ -99,14 +88,13 @@ func TestValidateAcceptance(t *testing.T) {
 }
 
 func TestValidateFormat(t *testing.T) {
-	var T = struct{ A string }{A: "hello"}
 	attrs := map[string]interface{}{"A": "hello"}
-	c := New(T, attrs).Cast([]string{"A"})
+	c := changeset.Cast[T](attrs)
 
 	re := regexp.MustCompile("hello")
-	c = c.ValidateFormat("A", re)
+	c = c.ValidateChange("A", changeset.FormatValidator{Pattern: re})
 
-	if !c.isValid {
+	if !c.IsValid {
 		t.Errorf("ValidateFormat shouldn't add error on a valid format keys")
 	}
 
@@ -117,15 +105,10 @@ func TestValidateFormat(t *testing.T) {
 	}
 }
 
-type T struct {
-	A string
-}
-
 func TestApply(t *testing.T) {
-	s := T{""}
 	attrs := map[string]interface{}{"A": "hello"}
-	c := New(s, attrs).Cast([]string{"A"})
-	r, err := Apply[T](c)
+	c := changeset.Cast[T](attrs)
+	r, err := changeset.Apply[T](c)
 
 	if err != nil {
 		t.Errorf("Apply should returna a valid T struct")
@@ -136,36 +119,34 @@ func TestApply(t *testing.T) {
 	}
 }
 
-func TestValidateLength(t *testing.T) {
-	var T = struct{ A string }{A: ""}
-	attrs := map[string]interface{}{"A": "hello"}
-	c := New(T, attrs).Cast([]string{"A"})
+type R struct{ A int }
 
-	if c := c.ValidateLength("A", 5); !c.isValid {
+func TestValidateLength(t *testing.T) {
+	attrs := map[string]interface{}{"A": "hello"}
+	c := changeset.Cast[T](attrs)
+
+	lv1 := changeset.LengthValidator{Min: 5, Max: 5}
+	if c := c.ValidateChange("A", lv1); !c.IsValid {
 		t.Errorf("ValidateChange should return truthy on correct length")
 	}
 
-	if c := c.ValidateLength("A", 10); c.isValid {
+	lv2 := changeset.LengthValidator{Min: 10, Max: 10}
+	if c := c.ValidateChange("A", lv2); c.IsValid {
 		t.Errorf("ValidateChange should return falsy on wrong length")
 	}
 
-	var R = struct{ A int }{A: 10}
 	attrs = map[string]interface{}{"A": 20}
-	c = New(R, attrs).Cast([]string{"A"})
+	c2 := changeset.Cast[R](attrs)
 
-	if c := c.ValidateLength("A", 5); c.isValid {
+	lvc2 := changeset.LengthValidator{Min: 5, Max: 5}
+	if c2 := c2.ValidateChange("A", lvc2); c2.IsValid {
 		t.Errorf("ValidateChange should return error on non string and slices types")
 	}
 }
 
 func TestCast(t *testing.T) {
-	var T = struct {
-		A string
-		B int
-	}{A: "", B: 0}
-
 	attrs := map[string]interface{}{"foo": 123, "A": "hello", "B": 2}
-	c := New(T, attrs).Cast([]string{"A", "B"})
+	c := changeset.Cast[T](attrs)
 
 	if p := c.GetParams(); !reflect.DeepEqual(p, attrs) {
 		t.Errorf("Cast should parse params as raw attrs, got: %v", p)
@@ -185,13 +166,8 @@ func TestCast(t *testing.T) {
 }
 
 func TestGetChange(t *testing.T) {
-	var T = struct {
-		A string
-		B int
-	}{A: "", B: 0}
-
 	attrs := map[string]interface{}{"foo": 123, "A": "hello", "B": 2}
-	c := New(T, attrs).Cast([]string{"A", "B"})
+	c := changeset.Cast[T](attrs)
 
 	if v, ok := c.GetChange("A"); !ok || !reflect.DeepEqual(v, "hello") {
 		t.Errorf("GetChange should return the correct value from key, got: %v", v)
@@ -199,45 +175,5 @@ func TestGetChange(t *testing.T) {
 
 	if v, ok := c.GetChange("B"); !ok || !reflect.DeepEqual(v, 2) {
 		t.Errorf("GetChange should return the correct value from key, got: %v", v)
-	}
-}
-
-func TestStructFields(t *testing.T) {
-	var T = struct {
-		A string
-		B int
-	}{A: "hello", B: 2}
-
-	a := StructFields(T)
-
-	if typ := reflect.TypeOf(a).Kind(); typ != reflect.Slice {
-		t.Errorf("StructFields should return an array of fields, got: %v", typ)
-	}
-
-	if l := len(a); l != 2 {
-		t.Errorf("StructFields should return an array of length 2, got: %d", l)
-	}
-}
-
-func TestMap(t *testing.T) {
-	var T = struct {
-		A string
-		B int
-	}{A: "hello", B: 2}
-
-	a := ToMap(T)
-
-	if typ := reflect.TypeOf(a).Kind(); typ != reflect.Map {
-		t.Errorf("Map should return aa map, got: %v", typ)
-	}
-
-	if l := len(a); l != 2 {
-		t.Errorf("Mapshould return a map of length 2, got: %d", l)
-	}
-
-	for _, val := range []interface{}{"hello", 2} {
-		if !inMap(a, val) {
-			t.Errorf("Map should have the value %v", val)
-		}
 	}
 }
