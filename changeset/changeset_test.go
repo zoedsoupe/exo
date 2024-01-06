@@ -41,7 +41,7 @@ func TestAddError(t *testing.T) {
 }
 
 func TestValidateRequired(t *testing.T) {
-	attrs := map[string]interface{}{"A": "hello"}
+	attrs := map[string]interface{}{}
 	c := changeset.Cast[T](attrs)
 
 	c = c.ValidateRequired([]string{"A", "B"})
@@ -51,6 +51,12 @@ func TestValidateRequired(t *testing.T) {
 	}
 
 	err := c.GetError("B")
+
+	if !(err != nil) {
+		t.Errorf("ValidateRequired should return an error on a existing key")
+	}
+
+	err = c.GetError("A")
 
 	if !(err != nil) {
 		t.Errorf("ValidateRequired should return an error on a existing key")

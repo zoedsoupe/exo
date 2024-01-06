@@ -357,7 +357,6 @@ func (c Changeset[T]) ValidateRequired(need []string) Changeset[T] {
 		if !exists || !reflect.ValueOf(fieldValue).IsValid() {
 			c.IsValid = false
 			c.errors[field] = fmt.Errorf("%s is required", field)
-			return c
 		}
 	}
 
@@ -415,4 +414,8 @@ func (c Changeset[T]) TraverseErrors(cb func(*Changeset[T], error, Validator) in
 	}
 
 	return result
+}
+
+func (c Changeset[T]) Validations() map[string]Validator {
+	return c.validations
 }
