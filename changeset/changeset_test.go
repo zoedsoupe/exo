@@ -1,6 +1,7 @@
 package changeset_test
 
 import (
+	"fmt"
 	"reflect"
 	"regexp"
 	"testing"
@@ -60,8 +61,8 @@ func TestUpdateChange(t *testing.T) {
 	attrs := map[string]interface{}{"A": "hello"}
 	c := changeset.Cast[T](attrs)
 
-	c = c.UpdateChange("A", func(a interface{}) interface{} {
-		return "foo"
+	c = c.UpdateChange("A", func(a interface{}) (interface{}, error) {
+		return "foo", nil
 	})
 
 	if a, ok := c.GetChange("A"); ok && a == "hello" {
@@ -175,5 +176,37 @@ func TestGetChange(t *testing.T) {
 
 	if v, ok := c.GetChange("B"); !ok || !reflect.DeepEqual(v, 2) {
 		t.Errorf("GetChange should return the correct value from key, got: %v", v)
+	}
+}
+
+func TestTraverseErrors(t *testing.T) {
+	attrs := map[string]interface{}{"A": 123, "B": "hello"}
+	c := changeset.Cast[T](attrs).ValidateChange("A", changeset.LengthValidator{Min: 1, Max: 2}).ValidateChange("B", changeset.EqualToValidator[int]{Value: 2})
+
+	errors := c.TraverseErrors(parseErrors)
+
+	err := errors["A"]
+	if err != "it's sucha minimal: 1" {
+		t.Errorf("TraverErrors should return the parsed error accordingly to the function gaved, returned: %v", err)
+	}
+
+	err = errors["B"]
+	if err != "wrong value: 2" {
+		t.Errorf("TraverErrors should return the parsed error accordingly to the function gaved, returned: %v", err)
+	}
+}
+
+func parseErrors[T interface{}](_c *changeset.Changeset[T], err error, v changeset.Validator) interface{} {
+	switch v.(type) {
+	case changeset.LengthValidator:
+		validator := v.(changeset.LengthValidator)
+		return fmt.Sprintf("it's sucha minimal: %d", validator.Min)
+
+	case changeset.EqualToValidator[int]:
+		validator := v.(changeset.EqualToValidator[int])
+		return fmt.Sprintf("wrong value: %d", validator.Value)
+
+	default:
+		return "I don't know"
 	}
 }

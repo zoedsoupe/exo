@@ -10,15 +10,16 @@ import (
 	"github.com/zoedsoupe/exo"
 )
 
-type changeset[T interface{}] struct {
-	changes map[string]interface{}
-	params  map[string]interface{}
-	errors  map[string]error
-	data    T
-	IsValid bool
+type Changeset[T interface{}] struct {
+	changes     map[string]interface{}
+	params      map[string]interface{}
+	errors      map[string]error
+	validations map[string]Validator
+	data        T
+	IsValid     bool
 }
 
-func Cast[T interface{}](params map[string]interface{}) changeset[T] {
+func Cast[T interface{}](params map[string]interface{}) Changeset[T] {
 	var s T
 
 	t := reflect.TypeOf(s)
@@ -26,11 +27,12 @@ func Cast[T interface{}](params map[string]interface{}) changeset[T] {
 		panic(fmt.Errorf("argument is not a struct"))
 	}
 
-	var c changeset[T]
+	var c Changeset[T]
 	c.params = params
 	c.data = s
 	c.IsValid = true
 	c.errors = make(map[string]error)
+	c.validations = make(map[string]Validator)
 	c.changes = make(map[string]interface{})
 
 	for _, f := range exo.StructFields(s) {
@@ -48,7 +50,7 @@ func Cast[T interface{}](params map[string]interface{}) changeset[T] {
 	return c
 }
 
-func Apply[T interface{}](c changeset[T]) (T, error) {
+func Apply[T interface{}](c Changeset[T]) (T, error) {
 	var s = c.data
 
 	t := reflect.TypeOf(s)
@@ -58,7 +60,7 @@ func Apply[T interface{}](c changeset[T]) (T, error) {
 
 	if !c.IsValid {
 		var msg strings.Builder
-		msg.WriteString("changeset has errors:\n\t")
+		msg.WriteString("Changeset has errors:\n\t")
 		for k, v := range c.errors {
 			error := fmt.Sprintf("%s: %s\n", k, v)
 			msg.WriteString(error)
@@ -87,12 +89,12 @@ func Apply[T interface{}](c changeset[T]) (T, error) {
 	return s, nil
 }
 
-func (c changeset[T]) AddError(field string, err string) changeset[T] {
+func (c Changeset[T]) AddError(field string, err string) Changeset[T] {
 	c.errors[field] = errors.New(err)
 	return c
 }
 
-func (c changeset[T]) PutChange(field string, change interface{}) changeset[T] {
+func (c Changeset[T]) PutChange(field string, change interface{}) Changeset[T] {
 	sfs := exo.StructFields(c.data)
 	var fields = make([]string, len(sfs))
 
@@ -121,8 +123,13 @@ func (c changeset[T]) PutChange(field string, change interface{}) changeset[T] {
 	return c
 }
 
-func (c changeset[T]) UpdateChange(field string, cb func(interface{}) interface{}) changeset[T] {
-	v := cb(c.changes[field])
+func (c Changeset[T]) UpdateChange(field string, cb func(interface{}) (interface{}, error)) Changeset[T] {
+	v, err := cb(c.changes[field])
+	if err != nil {
+		c.AddError(field, err.Error())
+		c.IsValid = false
+		return c
+	}
 	return c.PutChange(field, v)
 }
 
@@ -240,7 +247,11 @@ type LessThanValidator[T Number] struct {
 }
 
 func (ltv LessThanValidator[T]) Validate(field string, val interface{}) (bool, error) {
-	v := val.(T)
+	v, ok := val.(T)
+
+	if !ok {
+		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+	}
 
 	if v > ltv.MaxValue {
 		return false, fmt.Errorf("%s must be less than %v", field, v)
@@ -254,7 +265,11 @@ type LessThanOrEqualValidator[T Number] struct {
 }
 
 func (ltv LessThanOrEqualValidator[T]) Validate(field string, val interface{}) (bool, error) {
-	v := val.(T)
+	v, ok := val.(T)
+
+	if !ok {
+		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+	}
 
 	if v >= ltv.MaxValue {
 		return false, fmt.Errorf("%s must be less than or equal to %v", field, v)
@@ -268,7 +283,11 @@ type GreaterThanValidator[T Number] struct {
 }
 
 func (gtv GreaterThanValidator[T]) Validate(field string, val interface{}) (bool, error) {
-	v := val.(T)
+	v, ok := val.(T)
+
+	if !ok {
+		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+	}
 
 	if v < gtv.MinValue {
 		return false, fmt.Errorf("%s must be greater than %v", field, v)
@@ -282,7 +301,11 @@ type GreaterThanOrEqualValidator[T Number] struct {
 }
 
 func (gtv GreaterThanOrEqualValidator[T]) Validate(field string, val interface{}) (bool, error) {
-	v := val.(T)
+	v, ok := val.(T)
+
+	if !ok {
+		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+	}
 
 	if v <= gtv.MinValue {
 		return false, fmt.Errorf("%s must be greater than or equal to %v", field, v)
@@ -296,7 +319,11 @@ type EqualToValidator[T Number] struct {
 }
 
 func (ev EqualToValidator[T]) Validate(field string, val interface{}) (bool, error) {
-	v := val.(T)
+	v, ok := val.(T)
+
+	if !ok {
+		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+	}
 
 	if v == ev.Value {
 		return true, nil
@@ -310,7 +337,11 @@ type NotEqualToValidator[T Number] struct {
 }
 
 func (nev NotEqualToValidator[T]) Validate(field string, val interface{}) (bool, error) {
-	v := val.(T)
+	v, ok := val.(T)
+
+	if !ok {
+		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+	}
 
 	if v != nev.Value {
 		return true, nil
@@ -319,7 +350,7 @@ func (nev NotEqualToValidator[T]) Validate(field string, val interface{}) (bool,
 	return false, fmt.Errorf("%s must be not equal to %v", field, v)
 }
 
-func (c changeset[T]) ValidateRequired(need []string) changeset[T] {
+func (c Changeset[T]) ValidateRequired(need []string) Changeset[T] {
 	for _, field := range need {
 		fieldValue, exists := c.changes[field]
 
@@ -333,8 +364,9 @@ func (c changeset[T]) ValidateRequired(need []string) changeset[T] {
 	return c
 }
 
-func (c changeset[T]) ValidateChange(field string, v Validator) changeset[T] {
+func (c Changeset[T]) ValidateChange(field string, v Validator) Changeset[T] {
 	val, ok := c.GetChange(field)
+	c.validations[field] = v
 
 	if !ok {
 		msg := fmt.Sprintf("%s doesn't exist", field)
@@ -352,24 +384,35 @@ func (c changeset[T]) ValidateChange(field string, v Validator) changeset[T] {
 	return c
 }
 
-func (c changeset[T]) GetChange(field string) (interface{}, bool) {
+func (c Changeset[T]) GetChange(field string) (interface{}, bool) {
 	v, ok := c.changes[field]
 
 	return v, ok
 }
 
-func (c changeset[T]) GetChanges() map[string]interface{} {
+func (c Changeset[T]) GetChanges() map[string]interface{} {
 	return c.changes
 }
 
-func (c changeset[T]) GetParams() map[string]interface{} {
+func (c Changeset[T]) GetParams() map[string]interface{} {
 	return c.params
 }
 
-func (c changeset[T]) GetErrors() map[string]error {
+func (c Changeset[T]) GetErrors() map[string]error {
 	return c.errors
 }
 
-func (c changeset[T]) GetError(field string) error {
+func (c Changeset[T]) GetError(field string) error {
 	return c.errors[field]
+}
+
+func (c Changeset[T]) TraverseErrors(cb func(*Changeset[T], error, Validator) interface{}) map[string]interface{} {
+	var result = make(map[string]interface{}, len(c.errors))
+
+	for field, err := range c.errors {
+		final := cb(&c, err, c.validations[field])
+		result[field] = final
+	}
+
+	return result
 }
