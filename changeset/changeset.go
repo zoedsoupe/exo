@@ -1,6 +1,10 @@
+// changeset is an attempt to port the Elixir's library
+// for data structure validations and perform changes
+// in a lazy and reactive structure called Changeset.
 package changeset
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -10,6 +14,12 @@ import (
 	"github.com/zoedsoupe/exo"
 )
 
+// `Changeset[T]` represents the structure to
+// perform lazy validations and changes into
+// an already defined data structure.
+// It holds the `changes` normally called `attrs`
+// it `errors` for each field and a field that
+// you can always check if a `Changeset[T]` is valid.
 type Changeset[T interface{}] struct {
 	changes     map[string]interface{}
 	params      map[string]interface{}
@@ -19,6 +29,34 @@ type Changeset[T interface{}] struct {
 	IsValid     bool
 }
 
+func (c Changeset[T]) Error() string {
+	var out strings.Builder
+
+	out.WriteString("Changeset has errors:\n\t")
+
+	for field, err := range c.GetErrors() {
+		msg := fmt.Sprintf("%s: %s\n\t", field, err)
+		out.WriteString(msg)
+	}
+
+	return out.String()
+}
+
+// Convenience to transform a `Changeset[T]` to
+// a String JSON ready to be sent as HTTP server
+// response.
+func (c Changeset[T]) ErrorJSON() string {
+	j, err := json.Marshal(c.GetErrors())
+	if err != nil {
+		return err.Error()
+	}
+	return string(j)
+}
+
+// Fiven a data type and a map of attributes, filter
+// parameters that exists as field on the data type.
+// If the value of the parameter mismatch the data type field,
+// an error is added to the Changeset and it is amrked as invalid.
 func Cast[T interface{}](params map[string]interface{}) Changeset[T] {
 	var s T
 
@@ -37,63 +75,83 @@ func Cast[T interface{}](params map[string]interface{}) Changeset[T] {
 
 	for _, f := range exo.StructFields(s) {
 		field := f.Name
-
 		change, ok := params[field]
-
 		if !ok {
 			continue
 		}
 
-		c.changes[field] = change
+		sType := f.Type.String()
+		cType := reflect.TypeOf(change).String()
+		if cType != sType {
+			c.IsValid = false
+			msg := fmt.Errorf("type mismatch: expect %s got %s", sType, cType)
+			c.AddError(field, msg)
+		} else {
+			c.changes[field] = change
+		}
 	}
 
 	return c
 }
 
-func Apply[T interface{}](c Changeset[T]) (T, error) {
+// Same as Apply but handle a new instance of the desired
+// data structure.
+func ApplyNew[T interface{}](c Changeset[T]) (T, error) {
 	var s = c.data
+	err := Apply(&s, c)
+	return s, err
+}
 
-	t := reflect.TypeOf(s)
-	if t.Kind() != reflect.Struct {
-		return s, fmt.Errorf("argument is not a struct")
+// Given an already existence instance of the data type used
+// to generate the Changeset as a pointer, and the Changeset
+// it self, apply all changes to the instance.
+// Note that this function panic if given an invalid data type.
+func Apply[T interface{}](s *T, c Changeset[T]) error {
+	t := reflect.ValueOf(s)
+	if t.Kind() != reflect.Ptr {
+		panic(fmt.Errorf("argument to Apply is not a pointer to a struct"))
+	}
+	if t.Elem().Type().Kind() != reflect.Struct {
+		panic(fmt.Errorf("argument to Apply is not a struct"))
 	}
 
 	if !c.IsValid {
-		var msg strings.Builder
-		msg.WriteString("Changeset has errors:\n\t")
-		for k, v := range c.errors {
-			error := fmt.Sprintf("%s: %s\n", k, v)
-			msg.WriteString(error)
-		}
-		return s, errors.New(msg.String())
+		return c
 	}
 
-	r := reflect.ValueOf(&s).Elem()
+	r := reflect.ValueOf(s).Elem()
 	for key, value := range c.changes {
 		f := r.FieldByName(key)
-
 		if !(f.IsValid() && f.CanSet()) {
 			continue
 		}
 
 		val := reflect.ValueOf(value)
-
 		if !val.Type().AssignableTo(f.Type()) {
-			msg := fmt.Sprintf("type mismatch for field %s, expected %s found %s", key, f.Type().String(), val.Type().String())
-			return s, errors.New(msg)
+			msg := fmt.Errorf("type mismatch expected %s got %s", key, val.Type().String())
+			c.AddError(key, msg)
+			return c
 		}
 
 		f.Set(val)
 	}
 
-	return s, nil
+	return nil
 }
 
-func (c Changeset[T]) AddError(field string, err string) Changeset[T] {
-	c.errors[field] = errors.New(err)
+// Adds a new error on the given field. Note that if
+// already exists an error on the given field, it will
+// be overwritten.
+func (c Changeset[T]) AddError(field string, err error) Changeset[T] {
+	c.errors[field] = err
 	return c
 }
 
+// Writes a change into the given field. The only validation that
+// is made is the type matching for the given data type field.
+// Note that if a change is already present of the changes map,
+// it will be overwritten.
+// This function is more suited for internal usage into an application.
 func (c Changeset[T]) PutChange(field string, change interface{}) Changeset[T] {
 	sfs := exo.StructFields(c.data)
 	var fields = make([]string, len(sfs))
@@ -109,7 +167,7 @@ func (c Changeset[T]) PutChange(field string, change interface{}) Changeset[T] {
 
 			if !val.Type().AssignableTo(sf.Type) {
 				c.IsValid = false
-				c.errors[field] = fmt.Errorf("type mismatch for field %s, expected %s found %s", field, sf.Type.String(), val.Type().String())
+				c.errors[field] = fmt.Errorf("type mismatch, expected %s got %s", sf.Type.String(), val.Type().String())
 				return c
 			}
 
@@ -123,20 +181,33 @@ func (c Changeset[T]) PutChange(field string, change interface{}) Changeset[T] {
 	return c
 }
 
+// Given an callback receives the current change and would
+// return a change and an optional error, updates or transform
+// the change for the given field.
+// Note that the current change can be possibly a zero value
+// or `nil`. Also note that this function will behave like
+// `PutChange`, only make type assertions for fields and no
+// additional validation.
 func (c Changeset[T]) UpdateChange(field string, cb func(interface{}) (interface{}, error)) Changeset[T] {
 	v, err := cb(c.changes[field])
 	if err != nil {
-		c.AddError(field, err.Error())
+		c.AddError(field, err)
 		c.IsValid = false
 		return c
 	}
 	return c.PutChange(field, v)
 }
 
+// Interface to define custom validations for changesets.
+// Check `ValidateChange` for more information.
 type Validator interface {
 	Validate(field string, value interface{}) (bool, error)
 }
 
+// Validates that a given change has the desired length.
+// It works on string, map and slice types.
+// If you want an **exact** length, give the `Min` and `Max`
+// the same value.
 type LengthValidator struct {
 	Min int
 	Max int
@@ -176,6 +247,7 @@ func (lv LengthValidator) Validate(field string, v interface{}) (bool, error) {
 	return true, nil
 }
 
+// Validates if a string field would match the given Regexp pattern.
 type FormatValidator struct {
 	Pattern *regexp.Regexp
 }
@@ -194,6 +266,7 @@ func (fv FormatValidator) Validate(field string, val interface{}) (bool, error) 
 	return true, nil
 }
 
+// Validates if a boolean field is true.
 type AcceptanceValidator struct{}
 
 func (av AcceptanceValidator) Validate(field string, val interface{}) (bool, error) {
@@ -210,6 +283,8 @@ func (av AcceptanceValidator) Validate(field string, val interface{}) (bool, err
 	return true, nil
 }
 
+// Given a list of disallowed values, validates if the
+// value of a field isn't included into this list.
 type ExclusionValidator struct {
 	Disallowed []interface{}
 }
@@ -224,6 +299,9 @@ func (ev ExclusionValidator) Validate(field string, value interface{}) (bool, er
 	return false, fmt.Errorf("%s is reserved", field)
 }
 
+// Given a slice of desired values, validates if the
+// value of a field is included on this slice.
+// It can act like a type of "Enum".
 type InclusionValidator struct {
 	Allowed []interface{}
 }
@@ -238,10 +316,12 @@ func (iv InclusionValidator) Validate(field string, value interface{}) (bool, er
 	return false, fmt.Errorf("%s is invalid", field)
 }
 
+// Interface to define a possible numeric value.
 type Number interface {
 	int | uint | int8 | uint8 | int16 | uint16 | int32 | uint32 | int64 | uint64 | float32 | float64
 }
 
+// Validates that a `Number` is less than a given a max value.
 type LessThanValidator[T Number] struct {
 	MaxValue T
 }
@@ -260,6 +340,7 @@ func (ltv LessThanValidator[T]) Validate(field string, val interface{}) (bool, e
 	return true, nil
 }
 
+// Validates if a `Number` field is less than or equal to a max value.
 type LessThanOrEqualValidator[T Number] struct {
 	MaxValue T
 }
@@ -278,6 +359,7 @@ func (ltv LessThanOrEqualValidator[T]) Validate(field string, val interface{}) (
 	return true, nil
 }
 
+// Validates that a `Number` field is greater than a given minimal value.
 type GreaterThanValidator[T Number] struct {
 	MinValue T
 }
@@ -296,6 +378,7 @@ func (gtv GreaterThanValidator[T]) Validate(field string, val interface{}) (bool
 	return true, nil
 }
 
+// Validates if a `Number` field is greater than or equal to a given minimal value.
 type GreaterThanOrEqualValidator[T Number] struct {
 	MinValue T
 }
@@ -314,6 +397,7 @@ func (gtv GreaterThanOrEqualValidator[T]) Validate(field string, val interface{}
 	return true, nil
 }
 
+// Validates if a `Number` value is equal to a given exact value.
 type EqualToValidator[T Number] struct {
 	Value T
 }
@@ -332,6 +416,7 @@ func (ev EqualToValidator[T]) Validate(field string, val interface{}) (bool, err
 	return false, fmt.Errorf("%s must be equal to %v", field, v)
 }
 
+// Validates if a `Number` value is different to a given exact value.
 type NotEqualToValidator[T Number] struct {
 	Value T
 }
@@ -350,6 +435,9 @@ func (nev NotEqualToValidator[T]) Validate(field string, val interface{}) (bool,
 	return false, fmt.Errorf("%s must be not equal to %v", field, v)
 }
 
+// Given a slice of fields names, validates if all of them
+// are present on the `changes` Changeset field, ensuring
+// their existence.
 func (c Changeset[T]) ValidateRequired(need []string) Changeset[T] {
 	for _, field := range need {
 		fieldValue, exists := c.changes[field]
@@ -363,6 +451,9 @@ func (c Changeset[T]) ValidateRequired(need []string) Changeset[T] {
 	return c
 }
 
+// Given a field and a instance of a `Validator`, apply the
+// validation on the changeset and if any error is present,
+// add it to the `errors` Changeset field, marking it as invalid.
 func (c Changeset[T]) ValidateChange(field string, v Validator) Changeset[T] {
 	val, ok := c.GetChange(field)
 	c.validations[field] = v
@@ -383,28 +474,37 @@ func (c Changeset[T]) ValidateChange(field string, v Validator) Changeset[T] {
 	return c
 }
 
+// Get the value of a `changes` entry.
 func (c Changeset[T]) GetChange(field string) (interface{}, bool) {
 	v, ok := c.changes[field]
 
 	return v, ok
 }
 
+// Return all current changes that may be applied to the Changeset.
 func (c Changeset[T]) GetChanges() map[string]interface{} {
 	return c.changes
 }
 
+// Return the raw map that was gaved to `Cast`.
 func (c Changeset[T]) GetParams() map[string]interface{} {
 	return c.params
 }
 
+// Return a map of fields and their errors.
 func (c Changeset[T]) GetErrors() map[string]error {
 	return c.errors
 }
 
+// Return a specific error for a field.
 func (c Changeset[T]) GetError(field string) error {
 	return c.errors[field]
 }
 
+// Applies a callback on each error and return a map
+// of fields and the transformed errors.
+// The callback will receive a reference to the changeset
+// the current error and the `Validator` that it failed.
 func (c Changeset[T]) TraverseErrors(cb func(*Changeset[T], error, Validator) interface{}) map[string]interface{} {
 	var result = make(map[string]interface{}, len(c.errors))
 
@@ -416,10 +516,19 @@ func (c Changeset[T]) TraverseErrors(cb func(*Changeset[T], error, Validator) in
 	return result
 }
 
+// Return a map of fields and their applied `Validators`.
 func (c Changeset[T]) Validations() map[string]Validator {
 	return c.validations
 }
 
+// Check if a given field is present of the `changes`
+// Changeset field and returns a boolean of the result.
+// The behaviour is similar to `ValidateRequired`
+// although it only operates for a single field.
+// This is useful when performing complex validations that are
+// not possible with `ValidateRequired`.
+// For example, evaluating whether at least one field from
+// a list is present or evaluating that exactly one field from a list is present.
 func (c Changeset[T]) IsFieldMissing(field string) bool {
 	curr, exists := c.changes[field]
 

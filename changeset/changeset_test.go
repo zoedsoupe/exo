@@ -1,6 +1,7 @@
 package changeset_test
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -31,7 +32,7 @@ func TestAddError(t *testing.T) {
 	attrs := map[string]interface{}{"A": "hello"}
 	c := changeset.Cast[T](attrs)
 
-	c = c.AddError("A", "WE HAVE AN ERROR")
+	c = c.AddError("A", errors.New("WE HAVE AN ERROR"))
 
 	err := c.GetError("A")
 
@@ -113,16 +114,45 @@ func TestValidateFormat(t *testing.T) {
 }
 
 func TestApply(t *testing.T) {
+	var curr T
+	curr.A = "old value"
+	curr.B = 42
+
 	attrs := map[string]interface{}{"A": "hello"}
 	c := changeset.Cast[T](attrs)
-	r, err := changeset.Apply[T](c)
+	err := changeset.Apply[T](&curr, c)
 
 	if err != nil {
-		t.Errorf("Apply should returna a valid T struct")
+		t.Errorf("Apply should return a valid T struct")
 	}
 
-	if r.A != "hello" {
+	if curr.A != "hello" {
 		t.Errorf("Apply should return the struct with updates")
+	}
+
+	if curr.B != 42 {
+		t.Errorf("Apply shouldn't touch on non cast fields")
+	}
+}
+
+func TestApplyNew(t *testing.T) {
+	var curr T
+
+	attrs := map[string]interface{}{"A": "hello"}
+	c := changeset.Cast[T](attrs)
+	err := changeset.Apply[T](&curr, c)
+
+	if err != nil {
+		t.Errorf("Apply should return a valid T struct")
+	}
+
+	if curr.A != "hello" {
+		t.Errorf("Apply should return the struct with updates")
+	}
+
+	// it will have the init value of `int` field
+	if curr.B != 0 {
+		t.Errorf("Apply shouldn't touch on non cast fields")
 	}
 }
 
