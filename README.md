@@ -24,8 +24,6 @@ type User struct {
 }
 
 func main() {
-	var user User
-
 	// could be a body from a HTTP request
 	attrs := map[string]interface{}{
 		"Username":    "foo",
@@ -37,18 +35,22 @@ func main() {
 	fields := []string{"Username", "Password"}
 	re := regexp.MustCompile("[0-9]")
 
-	changeset := changeset.Cast[User](attrs) // creates new changeset
+	c := changeset.Cast[User](attrs) // creates new changeset
 	    .ValidateChange("Username", LengthValidator{Min: 3, Max: 3}) // validate the exact string length
 	    .ValidateChange("Username", DeniedValidator{Username: "denied"}) // validate custom changes
 	    .ValidateChange("Password", LengthValidator{Min: 10})
 	    .ValidateChange("Password", FormatValidator{Pattern: re}) // validate using regex
 	    .UpdateChange("Password", hashPassword) // transform changes into the changeset
 
-	user, err := changeset.Apply[User](changeset)
+	// here we're creating a new instance of `User`
+	// if you want to update an existing user
+	// use: changeset.Apply[User](&existingUser, changeset)
+	err := changeset.ApplyNew[User](changeset)
 	if err != nil {
-		// here will be a list of changeset errors OR
-		// an error on the struct building step
-		// example: mismatching types
+		// here will be the invalid changeset itself
+		// it implements the error interface so you can
+		// call `Error` method or even the convinience
+		// `ErrorJSON` for HTTP server responses
 		panic(err)
 	}
 
@@ -62,10 +64,10 @@ func hashPassword(pass interface{}) (interface{}, error) {
 	b := []byte(s)
 	hash, err := bcrypt.GenerateFromPassword(b, bcrypt.DefaultCost)
 	if err != {
-		return err // it will added to the changeset
+		return nil, err // it will added to the changeset
 	}
 
-	return string(hash)
+	return string(hash), nil
 }
 
 type DeniedValidator struct {
