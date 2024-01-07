@@ -57,10 +57,14 @@ func main() {
 	fmt.Println(username, password)
 }
 
-func hashPassword(pass interface{}) interface{} {
+func hashPassword(pass interface{}) (interface{}, error) {
 	s := pass.(string)
 	b := []byte(s)
-	hash, _ := bcrypt.GenerateFromPassword(b, bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword(b, bcrypt.DefaultCost)
+	if err != {
+		return err // it will added to the changeset
+	}
+
 	return string(hash)
 }
 
