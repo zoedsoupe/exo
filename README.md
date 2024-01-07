@@ -46,12 +46,13 @@ func main() {
 	// if you want to update an existing user
 	// use: changeset.Apply[User](&existingUser, changeset)
 	err := changeset.ApplyNew[User](changeset)
-	if err != nil {
+	if err != nil && errors.Is(err, &c) {
 		// here will be the invalid changeset itself
 		// it implements the error interface so you can
 		// call `Error` method or even the convinience
 		// `ErrorJSON` for HTTP server responses
-		panic(err)
+		err = err.(changeset.Changeset[User])
+		panic(err.Error())
 	}
 
 	username := user.Username // "foo"
@@ -63,7 +64,7 @@ func hashPassword(pass interface{}) (interface{}, error) {
 	s := pass.(string)
 	b := []byte(s)
 	hash, err := bcrypt.GenerateFromPassword(b, bcrypt.DefaultCost)
-	if err != {
+	if err != nil {
 		return nil, err // it will added to the changeset
 	}
 

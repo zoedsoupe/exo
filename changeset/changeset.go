@@ -4,7 +4,6 @@
 package changeset
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -29,7 +28,7 @@ type Changeset[T interface{}] struct {
 	IsValid     bool
 }
 
-func (c Changeset[T]) Error() string {
+func (c *Changeset[T]) Error() string {
 	var out strings.Builder
 
 	out.WriteString("Changeset has errors:\n\t")
@@ -45,12 +44,13 @@ func (c Changeset[T]) Error() string {
 // Convenience to transform a `Changeset[T]` to
 // a String JSON ready to be sent as HTTP server
 // response.
-func (c Changeset[T]) ErrorJSON() string {
-	j, err := json.Marshal(c.GetErrors())
-	if err != nil {
-		return err.Error()
+func (c *Changeset[T]) ErrorJSON() map[string]string {
+	var final = make(map[string]string)
+	for field, err := range c.GetErrors() {
+		final[field] = err.Error()
 	}
-	return string(j)
+
+	return final
 }
 
 // Fiven a data type and a map of attributes, filter
@@ -116,7 +116,7 @@ func Apply[T interface{}](s *T, c Changeset[T]) error {
 	}
 
 	if !c.IsValid {
-		return c
+		return &c
 	}
 
 	r := reflect.ValueOf(s).Elem()
@@ -130,7 +130,7 @@ func Apply[T interface{}](s *T, c Changeset[T]) error {
 		if !val.Type().AssignableTo(f.Type()) {
 			msg := fmt.Errorf("type mismatch expected %s got %s", key, val.Type().String())
 			c.AddError(key, msg)
-			return c
+			return &c
 		}
 
 		f.Set(val)
@@ -221,27 +221,27 @@ func (lv LengthValidator) Validate(field string, v interface{}) (bool, error) {
 	switch t {
 	case "string":
 		l = len(v.(string))
-		msg = "%s should be %s %d characters"
+		msg = "should be %s %d characters"
 	case "slice":
 		l = len(v.([]interface{}))
-		msg = "%s should have %s %d items"
+		msg = "should have %s %d items"
 	case "map":
 		l = len(v.(map[interface{}]interface{}))
-		msg = "%s should have %s %d elements"
+		msg = "should have %s %d elements"
 	default:
 		l = -1
 	}
 
 	if lv.Min == lv.Max && l != lv.Min {
-		return false, fmt.Errorf(msg, field, "", lv.Min)
+		return false, fmt.Errorf(msg, "", lv.Min)
 	}
 
 	if l < lv.Min {
-		return false, fmt.Errorf(msg, field, "at least", lv.Min)
+		return false, fmt.Errorf(msg, "at least", lv.Min)
 	}
 
 	if l > lv.Max {
-		return false, fmt.Errorf(msg, field, "at most", lv.Max)
+		return false, fmt.Errorf(msg, "at most", lv.Max)
 	}
 
 	return true, nil
@@ -256,11 +256,11 @@ func (fv FormatValidator) Validate(field string, val interface{}) (bool, error) 
 	v, ok := val.(string)
 
 	if !ok {
-		return false, fmt.Errorf("%s is not a string", field)
+		return false, fmt.Errorf("is not a string")
 	}
 
 	if fv.Pattern.FindString(v) == "" {
-		return false, fmt.Errorf("%s has invalid format", field)
+		return false, fmt.Errorf("has invalid format")
 	}
 
 	return true, nil
@@ -273,11 +273,11 @@ func (av AcceptanceValidator) Validate(field string, val interface{}) (bool, err
 	accepted, ok := val.(bool)
 
 	if !ok {
-		return false, fmt.Errorf("%s isn't a boolean", field)
+		return false, fmt.Errorf("isn't a boolean")
 	}
 
 	if !accepted {
-		return false, fmt.Errorf("%s must be accepted", field)
+		return false, fmt.Errorf("must be accepted")
 	}
 
 	return true, nil
@@ -296,7 +296,7 @@ func (ev ExclusionValidator) Validate(field string, value interface{}) (bool, er
 		}
 	}
 
-	return false, fmt.Errorf("%s is reserved", field)
+	return false, fmt.Errorf("is reserved")
 }
 
 // Given a slice of desired values, validates if the
@@ -313,7 +313,7 @@ func (iv InclusionValidator) Validate(field string, value interface{}) (bool, er
 		}
 	}
 
-	return false, fmt.Errorf("%s is invalid", field)
+	return false, errors.New("is invalid")
 }
 
 // Interface to define a possible numeric value.
@@ -330,11 +330,11 @@ func (ltv LessThanValidator[T]) Validate(field string, val interface{}) (bool, e
 	v, ok := val.(T)
 
 	if !ok {
-		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+		return false, fmt.Errorf("isn't a Number %v", v)
 	}
 
 	if v > ltv.MaxValue {
-		return false, fmt.Errorf("%s must be less than %v", field, v)
+		return false, fmt.Errorf("must be less than %v", v)
 	}
 
 	return true, nil
@@ -349,11 +349,11 @@ func (ltv LessThanOrEqualValidator[T]) Validate(field string, val interface{}) (
 	v, ok := val.(T)
 
 	if !ok {
-		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+		return false, fmt.Errorf("isn't a Number %v", v)
 	}
 
 	if v >= ltv.MaxValue {
-		return false, fmt.Errorf("%s must be less than or equal to %v", field, v)
+		return false, fmt.Errorf("must be less than or equal to %v", v)
 	}
 
 	return true, nil
@@ -368,11 +368,11 @@ func (gtv GreaterThanValidator[T]) Validate(field string, val interface{}) (bool
 	v, ok := val.(T)
 
 	if !ok {
-		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+		return false, fmt.Errorf("isn't a Number %v", v)
 	}
 
 	if v < gtv.MinValue {
-		return false, fmt.Errorf("%s must be greater than %v", field, v)
+		return false, fmt.Errorf("must be greater than %v", v)
 	}
 
 	return true, nil
@@ -387,11 +387,11 @@ func (gtv GreaterThanOrEqualValidator[T]) Validate(field string, val interface{}
 	v, ok := val.(T)
 
 	if !ok {
-		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+		return false, fmt.Errorf("isn't a Number %v", v)
 	}
 
 	if v <= gtv.MinValue {
-		return false, fmt.Errorf("%s must be greater than or equal to %v", field, v)
+		return false, fmt.Errorf("must be greater than or equal to %v", v)
 	}
 
 	return true, nil
@@ -406,14 +406,14 @@ func (ev EqualToValidator[T]) Validate(field string, val interface{}) (bool, err
 	v, ok := val.(T)
 
 	if !ok {
-		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+		return false, fmt.Errorf("isn't a Number %v", v)
 	}
 
 	if v == ev.Value {
 		return true, nil
 	}
 
-	return false, fmt.Errorf("%s must be equal to %v", field, v)
+	return false, fmt.Errorf("must be equal to %v", v)
 }
 
 // Validates if a `Number` value is different to a given exact value.
@@ -425,14 +425,14 @@ func (nev NotEqualToValidator[T]) Validate(field string, val interface{}) (bool,
 	v, ok := val.(T)
 
 	if !ok {
-		return false, fmt.Errorf("%s isn't a Number %v", field, v)
+		return false, fmt.Errorf("isn't a Number %v", v)
 	}
 
 	if v != nev.Value {
 		return true, nil
 	}
 
-	return false, fmt.Errorf("%s must be not equal to %v", field, v)
+	return false, fmt.Errorf("must be not equal to %v", v)
 }
 
 // Given a slice of fields names, validates if all of them
@@ -444,7 +444,7 @@ func (c Changeset[T]) ValidateRequired(need []string) Changeset[T] {
 
 		if !exists || !reflect.ValueOf(fieldValue).IsValid() {
 			c.IsValid = false
-			c.errors[field] = fmt.Errorf("%s is required", field)
+			c.errors[field] = errors.New("is required")
 		}
 	}
 
@@ -459,8 +459,7 @@ func (c Changeset[T]) ValidateChange(field string, v Validator) Changeset[T] {
 	c.validations[field] = v
 
 	if !ok {
-		msg := fmt.Sprintf("%s doesn't exist", field)
-		c.errors[field] = errors.New(msg)
+		c.errors[field] = errors.New("doesn't exist")
 		c.IsValid = false
 		return c
 	}
