@@ -216,3 +216,16 @@ func parseErrors[T interface{}](_c *changeset.Changeset[T], err error, v changes
 		return "I don't know"
 	}
 }
+
+func TestIsFieldMissing(t *testing.T) {
+	attrs := map[string]interface{}{"A": "hello"}
+	c := changeset.Cast[T](attrs)
+
+	if !c.IsFieldMissing("B") {
+		t.Errorf("IsFieldMissing should only return false on a existing field on the changeset")
+	}
+
+	if c.IsFieldMissing("A") {
+		t.Errorf("IsFieldMissing should only return true on a missing field on the changeset")
+	}
+}

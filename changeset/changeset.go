@@ -419,3 +419,13 @@ func (c Changeset[T]) TraverseErrors(cb func(*Changeset[T], error, Validator) in
 func (c Changeset[T]) Validations() map[string]Validator {
 	return c.validations
 }
+
+func (c Changeset[T]) IsFieldMissing(field string) bool {
+	curr, exists := c.changes[field]
+
+	if !exists || !reflect.ValueOf(curr).IsValid() {
+		return true
+	}
+
+	return false
+}
