@@ -32,7 +32,7 @@ jobs:
         run: earthly --version
 
       - name: Run builder
-        run: earthly -P --build-arg +build
+        run: earthly -P +build
 
       - name: Run tests
-        run: earthly -P --build-arg +test
+        run: earthly -P +test
